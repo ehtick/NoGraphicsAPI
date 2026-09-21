@@ -15,9 +15,9 @@ constexpr Access gpu_access = Access::shader_read | Access::shader_write | Acces
 
 } // namespace
 
-UploadQueue::UploadQueue(Device* device, uint64 capacity, uint32 queue_index) noexcept
+UploadQueue::UploadQueue(Device* device, uint64 capacity, uint32 queue_index, uint32 max_pending_batches) noexcept
 {
-    assert(device && capacity >= alignment && capacity % alignment == 0);
+    assert(device && capacity >= alignment && capacity % alignment == 0 && max_pending_batches);
     const DeviceCaps& caps = get_device_caps(device);
     assert(queue_index < caps.queue_count);
     state_.device = device;
@@ -35,8 +35,11 @@ UploadQueue::UploadQueue(Device* device, uint64 capacity, uint32 queue_index) no
     }
     state_.heap = create_gpu_heap(device, capacity, MemoryType::cpu_visible);
     state_.completion.semaphore = create_timeline_semaphore(device);
-    for (Batch& batch : state_.batches)
+    state_.batches = new Batch[max_pending_batches]{};
+    state_.max_pending_batches = max_pending_batches;
+    for (uint32 index = 0; index < max_pending_batches; ++index)
     {
+        Batch& batch = state_.batches[index];
         batch.pool = create_command_pool(device, queue_index);
         end_commands(begin_commands(batch.pool));
         reset_command_pool(batch.pool);
@@ -68,7 +71,8 @@ void UploadQueue::destroy() noexcept
 {
     assert(!state_.in_callback);
     if (state_.completion.semaphore) wait();
-    for (Batch& batch : state_.batches) destroy_command_pool(batch.pool);
+    for (uint32 index = 0; index < state_.max_pending_batches; ++index) destroy_command_pool(state_.batches[index].pool);
+    delete[] state_.batches;
     destroy_gpu_heap(state_.heap);
     destroy_timeline_semaphore(state_.completion.semaphore);
     state_ = {};
@@ -84,7 +88,7 @@ void UploadQueue::reclaim() noexcept
         Batch& batch = state.batches[state.retirement_first];
         state.tail = batch.end;
         reset_command_pool(batch.pool);
-        state.retirement_first = (state.retirement_first + 1) % retirement_capacity;
+        state.retirement_first = (state.retirement_first + 1) % state.max_pending_batches;
         --state.retirement_count;
     }
 }
@@ -133,12 +137,12 @@ CommandBuffer* UploadQueue::begin() noexcept
     assert(state.completion.semaphore && !state.in_callback);
     if (!state.commands)
     {
-        if (state.retirement_count == retirement_capacity)
+        if (state.retirement_count == state.max_pending_batches)
         {
             reclaim();
-            if (state.retirement_count == retirement_capacity) wait_oldest();
+            if (state.retirement_count == state.max_pending_batches) wait_oldest();
         }
-        state.commands = begin_commands(state.batches[(state.retirement_first + state.retirement_count) % retirement_capacity].pool);
+        state.commands = begin_commands(state.batches[(state.retirement_first + state.retirement_count) % state.max_pending_batches].pool);
         barrier(state.commands, Stage::all_commands, state.queue_access, state.upload_stages, state.upload_access);
     }
     return state.commands;
@@ -201,7 +205,7 @@ TimelinePoint UploadQueue::flush() noexcept
     end_commands(state.commands);
     ++state.completion.value;
     submit(state.device, {.commands = {state.commands}, .completion = state.completion}, state.queue_index);
-    Batch& batch = state.batches[(state.retirement_first + state.retirement_count) % retirement_capacity];
+    Batch& batch = state.batches[(state.retirement_first + state.retirement_count) % state.max_pending_batches];
     batch.end = state.head;
     batch.value = state.completion.value;
     ++state.retirement_count;

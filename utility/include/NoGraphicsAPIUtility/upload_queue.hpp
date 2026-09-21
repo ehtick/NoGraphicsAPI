@@ -21,12 +21,12 @@ struct UploadQueueStats
 class UploadQueue
 {
 public:
-    static constexpr uint32 retirement_capacity = 16;
     static constexpr uint32 operation_limit = 4096;
     static constexpr uint64 alignment = 16;
 
     // Capacity must be a positive multiple of 16. queue_index must be less than DeviceCaps::queue_count.
-    explicit UploadQueue(Device* device, uint64 capacity = 64ull * 1024 * 1024, uint32 queue_index = 0) noexcept;
+    // max_pending_batches must be nonzero; normally match the number of frames in flight.
+    explicit UploadQueue(Device* device, uint64 capacity = 64ull * 1024 * 1024, uint32 queue_index = 0, uint32 max_pending_batches = 2) noexcept;
     ~UploadQueue() noexcept;
     // Flushes and waits for uploads. Finish external submissions using returned timeline points before destruction or move assignment.
     void destroy() noexcept;
@@ -36,7 +36,7 @@ public:
     UploadQueue(UploadQueue&& other) noexcept;
     UploadQueue& operator=(UploadQueue&& other) noexcept;
 
-    // Sources are copied immediately. Storage never grows: capacity or operation pressure may submit work and wait for reusable space.
+    // Sources are copied immediately. Staging and batch storage never grow; reuse waits for completion when needed.
     // Flush between overlapping transfer writes. Buffer copies follow copy_memory's requirements; large sources are split to fit.
     void upload_buffer(GpuRange destination, ByteSpan source) noexcept;
     // Source covers one complete region, including pitch padding, and must fit capacity. The region follows copy_memory_to_texture's requirements.
@@ -82,7 +82,8 @@ private:
         CommandBuffer* commands = nullptr;
         uint64 head = 0;
         uint64 tail = 0;
-        Batch batches[retirement_capacity]{};
+        Batch* batches = nullptr;
+        uint32 max_pending_batches = 0;
         uint32 queue_index = 0;
         Stage upload_stages = Stage::transfer;
         Access upload_access = Access::transfer_read | Access::transfer_write;

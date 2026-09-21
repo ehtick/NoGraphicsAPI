@@ -18,6 +18,7 @@ static_assert(!__is_assignable(UploadQueue&, const UploadQueue&));
 static_assert(!__is_constructible(UploadQueue));
 static_assert(__is_nothrow_constructible(UploadQueue, Device*));
 static_assert(__is_nothrow_constructible(UploadQueue, Device*, uint64, uint32));
+static_assert(__is_nothrow_constructible(UploadQueue, Device*, uint64, uint32, uint32));
 static_assert(__is_nothrow_constructible(UploadQueue, UploadQueue&&));
 static_assert(!detail::is_convertible_v<Device*, UploadQueue>);
 
@@ -25,7 +26,7 @@ static const uint32 buffer_bytes = 20 * 1024;
 static const uint32 readback_bytes = 128 * 1024;
 static const uint32 guard_bytes = 32;
 static const uint32 texture_count = 6;
-static const uint32 timestamp_batches = UploadQueue::retirement_capacity + 2;
+static const uint32 timestamp_batches = 4;
 static uint32 failures = 0;
 
 struct TextureCase
@@ -234,7 +235,7 @@ static void run_small_ring(Fixture& fixture)
         memcpy(fixture.expected + guard_bytes + 256 + iteration * 4, &value, sizeof(value));
         fixture.ring.upload_buffer({.gpu = fixture.buffer.range.gpu + 256 + iteration * 4, .size = sizeof(value)}, {&value, sizeof(value)});
         fixture.ring.flush();
-        check(fixture.ring.stats().pending_batches <= UploadQueue::retirement_capacity, "retirement metadata remains bounded across repeated submissions");
+        check(fixture.ring.stats().pending_batches <= 2, "default batch limit bounds pending batches across repeated submissions");
     }
     for (uint32 index = 0; index < fixture.case_count; ++index)
     {
@@ -297,9 +298,9 @@ static void run_reclaim_before_flush(Fixture& fixture)
     read_results(fixture);
 }
 
-static void run_non_power_of_two(Fixture& fixture)
+static void run_non_power_of_two(Fixture& fixture, uint32 max_pending_batches)
 {
-    fixture.ring = UploadQueue(fixture.device, 272);
+    fixture.ring = UploadQueue(fixture.device, 272, 0, max_pending_batches);
     uint8 bytes[272]{};
     uint32 offset = 1024;
     const uint32 sizes[]{272, 4, 20};
@@ -357,11 +358,11 @@ static void run_move_ownership(Fixture& fixture)
     for (uint32 index = 0; index < sizeof(bytes); ++index) bytes[index] = uint8(index * 41 + 93);
     memcpy(fixture.expected + guard_bytes + 512, bytes, sizeof(bytes));
     {
-        UploadQueue original(fixture.device, 256);
+        UploadQueue original(fixture.device, 256, 0, 3);
         original.upload_buffer({.gpu = fixture.buffer.range.gpu + 512, .size = sizeof(bytes)}, {bytes, sizeof(bytes)});
         UploadQueue moved(static_cast<UploadQueue&&>(original));
         check(!original.stats().capacity && moved.stats().pending_operations == 1, "move construction transfers unsubmitted copies");
-        UploadQueue replacement(fixture.device, 128);
+        UploadQueue replacement(fixture.device, 128, 0, 1);
         replacement = static_cast<UploadQueue&&>(moved);
         check(!moved.stats().capacity && replacement.stats().capacity == 256 && replacement.stats().pending_operations == 1,
             "move assignment replaces an initialized destination and preserves pending copies");
@@ -496,7 +497,7 @@ static void run_multiple_queues(Fixture& fixture, uint32 queue_index = 1)
         return;
     }
     fixture.ring.destroy();
-    UploadQueue original(fixture.device, 256, queue_index);
+    UploadQueue original(fixture.device, 256, queue_index, 3);
     order_queue(fixture, queue_index);
     TimelinePoint pending = original.flush();
     ++pending.value;
@@ -532,10 +533,10 @@ static void run_multiple_queues(Fixture& fixture, uint32 queue_index = 1)
     fixture.ring.wait();
 }
 
-static void run_retirement_capacity(Fixture& fixture)
+static void run_max_pending_batches(Fixture& fixture, uint32 max_pending_batches)
 {
     if (get_device_caps(fixture.device).queue_count < 2) return;
-    fixture.ring = UploadQueue(fixture.device, 1024);
+    fixture.ring = UploadQueue(fixture.device, 1024, 0, max_pending_batches);
     TimelineSemaphore* gate = create_timeline_semaphore(fixture.device);
     if (!gate) { check(false, "retirement gate initializes"); return; }
     CommandPool* release_pool = create_command_pool(fixture.device);
@@ -544,20 +545,26 @@ static void run_retirement_capacity(Fixture& fixture)
     end_commands(blocked);
     submit(fixture.device, {.commands = {blocked}, .waits = {{.semaphore = gate, .value = 1}},
         .completion = {.semaphore = fixture.completion.semaphore, .value = ++fixture.completion.value}});
-    for (uint32 index = 0; index < UploadQueue::retirement_capacity; ++index)
+    for (uint32 index = 0; index < max_pending_batches; ++index)
     {
         const uint32 value = 0xcafe0000u + index;
         fixture.ring.upload_buffer({.gpu = fixture.buffer.range.gpu + index * sizeof(value), .size = sizeof(value)}, {&value, sizeof(value)});
         fixture.ring.flush();
         memcpy(fixture.expected + guard_bytes + index * sizeof(value), &value, sizeof(value));
     }
-    check(fixture.ring.stats().pending_batches == UploadQueue::retirement_capacity,
-        "all retirement slots remain occupied while the queue is gated");
+    check(fixture.ring.stats().pending_batches == max_pending_batches && !fixture.ring.stats().waits,
+        "configured number of batches remains in flight without waiting while the queue is gated");
+    UploadQueue moved(static_cast<UploadQueue&&>(fixture.ring));
+    check(!fixture.ring.stats().capacity && moved.stats().pending_batches == max_pending_batches, "move construction preserves submitted batches");
+    fixture.ring = static_cast<UploadQueue&&>(moved);
+    check(!moved.stats().capacity && fixture.ring.stats().pending_batches == max_pending_batches, "move assignment preserves submitted batches");
     CommandBuffer* release = begin_commands(release_pool);
     end_commands(release);
     submit(fixture.device, {.commands = {release}, .completion = {.semaphore = gate, .value = 1}}, 1);
     const uint32 final_value = 0x1973abcd;
     fixture.ring.upload_buffer({.gpu = fixture.buffer.range.gpu + 256, .size = sizeof(final_value)}, {&final_value, sizeof(final_value)});
+    check(fixture.ring.stats().pending_batches < max_pending_batches && fixture.ring.stats().pending_operations == 1,
+        "an additional batch reuses a completed slot");
     memcpy(fixture.expected + guard_bytes + 256, &final_value, sizeof(final_value));
     fixture.ring.wait();
     wait_timeline(fixture.completion);
@@ -605,14 +612,18 @@ int main(int argc, char** argv)
     run_pitched_texture(fixture);
     run_attachment_consumers(fixture);
     run_reclaim_before_flush(fixture);
-    run_non_power_of_two(fixture);
     run_empty_batches_and_destroy(fixture);
     run_move_ownership(fixture);
     run_operation_limit(fixture);
 #if defined(NOGRAPHICSAPI_UPLOAD_QUEUE_SPV_PATH)
     run_compute_callbacks(fixture);
 #endif
-    run_retirement_capacity(fixture);
+    const uint32 batch_limits[]{1, 2, 3};
+    for (uint32 max_pending_batches : batch_limits)
+    {
+        run_non_power_of_two(fixture, max_pending_batches);
+        run_max_pending_batches(fixture, max_pending_batches);
+    }
     run_multiple_queues(fixture);
     if (queue_families)
     {
