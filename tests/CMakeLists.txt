@@ -61,6 +61,15 @@ add_test(NAME test_placed_texture COMMAND test_placed_texture)
 add_executable(test_multithreading multithreading_test.cpp)
 NoGraphicsAPI_disable_exceptions(test_multithreading)
 target_link_libraries(test_multithreading PRIVATE NoGraphicsAPI::NoGraphicsAPI Threads::Threads)
+
+# Manual device-loss reproducer: no library implementation, shaders, or timestamp queries.
+add_executable(repro_queue_device_lost EXCLUDE_FROM_ALL repro_queue_device_lost.cpp)
+set_target_properties(repro_queue_device_lost PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/repro")
+NoGraphicsAPI_disable_exceptions(repro_queue_device_lost)
+target_compile_features(repro_queue_device_lost PRIVATE cxx_std_20)
+target_include_directories(repro_queue_device_lost PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(repro_queue_device_lost PRIVATE Vulkan::Vulkan Threads::Threads)
+
 add_test(NAME test_multithreading COMMAND test_multithreading)
 add_test(NAME test_multiple_queues COMMAND test_multithreading --multiple-queues)
 add_test(NAME test_queue_family_threads COMMAND test_multithreading --queue-families)
