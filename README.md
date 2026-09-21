@@ -103,11 +103,11 @@ and [NVIDIA 616.64 WHQL](https://us.download.nvidia.com/Windows/616.64/616.64-wi
 | AMD RDNA 3 (dGPU) | Windows / Adrenalin 26.9.1 | [RX 7000](https://vulkan.gpuinfo.org/displayreport.php?id=51443) | PCIe ReBAR | Supported |
 | AMD RDNA 3 (iGPU) | Windows / Adrenalin 26.9.1 | [700M](https://vulkan.gpuinfo.org/displayreport.php?id=49646) | UMA | Supported |
 | AMD RDNA 4 (dGPU) | Windows / Adrenalin 26.9.1 | [RX 9000](https://vulkan.gpuinfo.org/displayreport.php?id=51293) | PCIe ReBAR | Supported |
-| NVIDIA Turing | Windows / NVIDIA 616.64 | [GTX 16][gtx16] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
-| NVIDIA Turing | Windows / NVIDIA 616.64 | [RTX 20][turing] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
-| NVIDIA Ampere | Windows / NVIDIA 616.64 | [RTX 30](https://vulkan.gpuinfo.org/displayreport.php?id=51549) | PCIe ReBAR | Supported |
-| NVIDIA Ada Lovelace | Windows / NVIDIA 616.64 | [RTX 40](https://vulkan.gpuinfo.org/displayreport.php?id=51469) | PCIe ReBAR | Supported |
-| NVIDIA Blackwell | Windows / NVIDIA 616.64 | [RTX 50](https://vulkan.gpuinfo.org/displayreport.php?id=51573) | PCIe ReBAR | Supported |
+| NVIDIA Turing | Windows / NVIDIA 616.64 | [GTX 16 series][gtx16] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
+| NVIDIA Turing | Windows / NVIDIA 616.64 | [RTX 20 series][turing] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
+| NVIDIA Ampere | Windows / NVIDIA 616.64 | [RTX 30 series](https://vulkan.gpuinfo.org/displayreport.php?id=51549) | PCIe ReBAR | Supported |
+| NVIDIA Ada Lovelace | Windows / NVIDIA 616.64 | [RTX 40 series](https://vulkan.gpuinfo.org/displayreport.php?id=51469) | PCIe ReBAR | Supported |
+| NVIDIA Blackwell | Windows / NVIDIA 616.64 | [RTX 50 series](https://vulkan.gpuinfo.org/displayreport.php?id=51573) | PCIe ReBAR | Supported |
 
 🔴 marks missing extensions or a capacity-limited fixed BAR. Mapped heaps require coherent CPU-visible
 GPU memory. Enable ReBAR where available on discrete GPUs; integrated GPUs use UMA. A fixed BAR can
@@ -131,7 +131,7 @@ See [known driver issues](docs/known-driver-issues.md) for observed problems and
 2. Install [CMake 3.24+](https://cmake.org/download/) and make `cmake` available on `PATH`.
 3. Install the [Vulkan SDK 1.4.357+](https://vulkan.lunarg.com/sdk/home). Shader validation requires
    SPIRV-Tools 2026.3+; make the SDK's `Bin` directory, containing `spirv-val.exe`, available on `PATH`.
-4. Download a [Slang 2026.14.1+ Windows x64 release](https://github.com/shader-slang/slang/releases),
+4. Use Slang 2026.13.1+ from the Vulkan SDK, or download a [standalone Windows x64 release](https://github.com/shader-slang/slang/releases),
    extract it, and add its `bin` directory to `PATH`.
 5. Install a GPU driver meeting the hardware requirements above. The Vulkan SDK does not replace
    the GPU driver.
