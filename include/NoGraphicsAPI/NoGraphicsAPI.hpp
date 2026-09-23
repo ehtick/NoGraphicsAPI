@@ -749,6 +749,7 @@ void copy_texture_to_memory(CommandBuffer* commands, Texture* source, GpuRange d
 void barrier(CommandBuffer* commands, Stage before, Access before_access, Stage after, Access after_access) noexcept;
 
 // Up to DeviceDesc::timestamp_query_count markers per command buffer. stage must map to a single GPU pipeline stage.
+// Ignored, leaving the destination unchanged, when timestamps are disabled or the queue lacks profiling support.
 // Destinations must be 8-byte aligned and distinct until submission completes.
 // Results are available after submission completes; only then read mapped readback memory.
 void write_timestamp(CommandBuffer* commands, uint64* gpu_destination, Stage stage = Stage::all_commands) noexcept;

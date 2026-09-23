@@ -584,6 +584,7 @@ struct CommandPool
     CommandBuffer* first = nullptr;
     CommandBuffer* last = nullptr;
     CommandBuffer* next_buffer = nullptr;
+    bool timestamps = false;
 };
 
 namespace detail
@@ -593,6 +594,7 @@ struct Queue
 {
     VkQueue queue = VK_NULL_HANDLE;
     uint32 family_index = 0;
+    bool timestamps = false;
     VkCommandBufferSubmitInfo* command_submit_infos = nullptr;
     size_t command_submit_capacity = 0;
     VkSemaphoreSubmitInfo* wait_submit_infos = nullptr;
@@ -1384,6 +1386,7 @@ struct Candidate
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
     uint32 queue_families[queue_type_count]{};
     uint32 queue_counts[queue_type_count]{};
+    bool timestamps[queue_type_count]{};
     uint32x3 copy_texture_granularity = {.x = 1, .y = 1, .z = 1};
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory_properties{};
@@ -1479,7 +1482,6 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         features.vulkan12.scalarBlockLayout == VK_TRUE &&
         features.vulkan12.bufferDeviceAddress == VK_TRUE &&
         features.vulkan12.timelineSemaphore == VK_TRUE &&
-        features.vulkan12.hostQueryReset == VK_TRUE &&
         features.vulkan13.synchronization2 == VK_TRUE &&
         features.vulkan13.dynamicRendering == VK_TRUE &&
         features.vulkan13.maintenance4 == VK_TRUE &&
@@ -1510,7 +1512,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_count, queues);
     for (uint32 index = 0; index < queue_count; ++index)
     {
-        if (queues[index].queueCount == 0 || queues[index].timestampValidBits != 64)
+        if (queues[index].queueCount == 0)
             continue;
         const VkQueueFlags flags = queues[index].queueFlags;
         uint32 type = 0;
@@ -1543,6 +1545,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         {
             result.queue_families[type] = index;
             result.queue_counts[type] = queues[index].queueCount;
+            result.timestamps[type] = desc.timestamp_query_count != 0 && queues[index].timestampValidBits == 64 && features.vulkan12.hostQueryReset;
             if (type == 2)
             {
                 result.copy_texture_granularity = {
@@ -1777,7 +1780,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     enabled_features.vulkan12.shaderFloat16 = VK_TRUE;
     enabled_features.vulkan12.scalarBlockLayout = VK_TRUE;
     enabled_features.vulkan12.timelineSemaphore = VK_TRUE;
-    enabled_features.vulkan12.hostQueryReset = VK_TRUE;
+    enabled_features.vulkan12.hostQueryReset = selected.timestamps[0] || selected.timestamps[1] || selected.timestamps[2];
     enabled_features.vulkan12.bufferDeviceAddress = VK_TRUE;
     enabled_features.vulkan13.synchronization2 = VK_TRUE;
     enabled_features.vulkan13.dynamicRendering = VK_TRUE;
@@ -1854,6 +1857,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         {
             detail::Queue& queue = state->queues[first_queue++];
             queue.family_index = selected.queue_families[type];
+            queue.timestamps = selected.timestamps[type];
             vkGetDeviceQueue(state->device, queue.family_index, index, &queue.queue);
         }
     }
@@ -1998,6 +2002,7 @@ void wait_timeline(TimelinePoint point) noexcept
 void write_timestamp(CommandBuffer* commands, uint64* gpu_destination, Stage stage) noexcept
 {
     assert(commands && commands->state);
+    if (!commands->timestamp_pool) return;
     assert(commands->timestamp_count < commands->state->timestamp_query_count);
     commands->timestamp_destinations[commands->timestamp_count] = static_cast<VkDeviceAddress>(reinterpret_cast<uintptr>(gpu_destination));
     vkCmdWriteTimestamp2(commands->command_buffer, to_vk(stage), commands->timestamp_pool, commands->timestamp_count++);
@@ -2887,7 +2892,7 @@ void destroy_pso(PSO* pso) noexcept
 CommandPool* create_command_pool(Device* device, uint32 queue_index) noexcept
 {
     assert(device && queue_index < device->queue_count && "create_command_pool requires an available queue index");
-    CommandPool* pool = new CommandPool{.state = device};
+    CommandPool* pool = new CommandPool{.state = device, .timestamps = device->queues[queue_index].timestamps};
     const VkCommandPoolCreateInfo pool_info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
@@ -2942,7 +2947,7 @@ CommandBuffer* begin_commands(CommandPool* pool) noexcept
             .commandBufferCount = 1,
         };
         require_vk(vkAllocateCommandBuffers(pool->state->device, &allocate_info, &commands->command_buffer));
-        if (pool->state->timestamp_query_count != 0)
+        if (pool->timestamps)
         {
             const VkQueryPoolCreateInfo query_info{
                 .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,

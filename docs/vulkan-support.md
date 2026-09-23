@@ -16,6 +16,17 @@ The current backend targets desktop Vulkan 1.4. MoltenVK is intentionally unsupp
 the only presentation backend. Headless library builds are supported on the other configured
 desktop platforms.
 
+## Compatibility target
+
+Mesh shaders, buffer device address, and native descriptor heaps define the required graphics model.
+Other differences should be handled by backend adaptations or optional capabilities, including device
+address commands, unified image layouts, and timestamp support. Profiling must not exclude a device
+from ordinary rendering.
+
+The priority targets are desktop PCs, ROG Ally, and Intel on Windows, with support determined by the
+drivers available for those systems. The requirements below describe the current implementation,
+which still has stricter checks than this target.
+
 ## Vulkan feature surface
 
 Support is determined by extension enumeration and feature queries at startup. A Vulkan version
@@ -34,7 +45,7 @@ conventional feature checked by device creation.
 | Vulkan 1.3 `synchronization2` and `dynamicRendering` | Resource-free barriers and rendering without render-pass or framebuffer objects. |
 | Core Vulkan dynamic state | Command-set viewport, scissor, and exposed depth/stencil state. |
 | Timeline semaphores | Application-visible completion points and cross-queue waits; private swapchain retirement. |
-| 64-bit graphics/compute timestamps | GPU markers resolve to application-owned GPU addresses by submission completion. |
+| 64-bit timestamps (optional) | Supported queues resolve GPU markers to application-owned GPU addresses by submission completion. |
 | Shader and layout features | Scalar layout, float16, 16-bit push/storage access, draw parameters, independent blending, and formatless storage-image access. |
 | Texture features | At least BC or ASTC LDR compression; exact format and usage support remains queryable. |
 | Win32 WSI | `VK_KHR_surface`, `VK_KHR_win32_surface`, `VK_KHR_swapchain`, and the maintenance extensions listed below. |
@@ -222,6 +233,8 @@ stages share the same root ABI and descriptor heaps.
 
 `write_timestamp(commands, gpu_destination)` captures a 64-bit timestamp, defaulting to `Stage::all_commands`.
 `DeviceDesc::timestamp_query_count` sets each command buffer's capacity and defaults to 256. Zero disables timestamps and their pool/storage allocation.
+Timestamp calls are ignored and leave their destinations unchanged when disabled or when the command buffer's queue lacks 64-bit counters
+or host query reset support. These capabilities do not restrict device or queue selection, and unsupported queues allocate no timestamp storage.
 Markers target distinct, 8-byte-aligned destinations. The backend copies private query results to those
 addresses through `vkCmdCopyQueryPoolResultsToMemoryKHR`, outside rendering and after any suspended chain.
 Markers are valid inside each rendering segment, but not between suspension and resumption.

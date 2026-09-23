@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 namespace
 {
@@ -279,9 +280,9 @@ bool test_timestamp_capacity(uint32 count) noexcept
     return valid;
 }
 
-bool test_without_timestamps() noexcept
+bool test_without_timestamps(uint32 query_count = 0) noexcept
 {
-    const gpu::DeviceInit initialized = gpu::create_device({.timestamp_query_count = 0});
+    const gpu::DeviceInit initialized = gpu::create_device({.timestamp_query_count = query_count});
     if (initialized.error != gpu::Error::none) return false;
     gpu::Device* device = initialized.device;
     gpu::TimelineSemaphore* timeline = gpu::create_timeline_semaphore(device);
@@ -304,8 +305,10 @@ bool test_without_timestamps() noexcept
             commands[index] = gpu::begin_commands(pool);
             if (batch == 0) first_commands[index] = commands[index];
             else batch_valid = batch_valid && commands[index] == first_commands[index];
+            gpu::write_timestamp(commands[index], reinterpret_cast<uint64*>(readback.range.gpu) + index * 2);
             gpu::copy_memory(commands[index], {.gpu = source.range.gpu + index * sizeof(uint64), .size = sizeof(uint64)},
                              {.gpu = readback.range.gpu + (index * 2 + 1) * sizeof(uint64), .size = sizeof(uint64)});
+            gpu::write_timestamp(commands[index], reinterpret_cast<uint64*>(readback.range.gpu) + index * 2 + 2);
             gpu::barrier(commands[index], gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
             gpu::end_commands(commands[index]);
         }
@@ -549,8 +552,11 @@ bool test_placed_textures(gpu::Device* device, const gpu::DeviceCaps& caps, gpu:
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--timestamps-unavailable") == 0)
+        return test_without_timestamps(256) ? 0 : 1;
+
     const gpu::DeviceInit device_init = gpu::create_device();
     if (device_init.error == gpu::Error::unsupported)
         return skipped;
