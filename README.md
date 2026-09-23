@@ -31,8 +31,7 @@ still needs. NoGraphicsAPI makes that alternative data model the foundation of t
   creation. Viewport, scissor, and depth/stencil state are set independently, reducing pipeline
   permutations. Rasterization, blending, and attachment formats still belong to pipeline objects.
 - **Barriers without resource lists.** Synchronization describes which work produces and consumes
-  data, not a list of buffer and image transitions. Applications do not track image layouts, and a
-  barrier can cover data selected through GPU pointers or bindless indices.
+  data, not a list of buffer and image transitions. Applications do not track image layouts.
 
 This is a low-level library: the application still owns allocation policy, resource lifetime, and
 GPU synchronization. The optional NoGraphicsAPIUtility library supplies shared shader types, math,
@@ -66,7 +65,7 @@ The shader reads `root.vertices[vertex_id]` and follows `root.material` directly
 remain behind pointers; there is no buffer-binding step for either field.
 
 One deliberate difference from the blog: this implementation copies small root arguments (up to 256 bytes) per command
-and shares them across graphics stages, rather than passing separate GPU-resident roots for each stage.
+and shares them across graphics stages, rather than passing separate GPU root pointers for each stage.
 See the [design comparison](docs/no-graphics-api-comparison.md) for the remaining differences and
 the [shader guide](docs/slang.md) for complete examples.
 
@@ -75,6 +74,8 @@ the [shader guide](docs/slang.md) for complete examples.
 There are no internal mutexes. The application must externally synchronize each queue and command pool.
 The recommended setup is one command pool per in-flight frame per recording thread.
 Independent pools can record concurrently, and work can be submitted to multiple GPU queues.
+
+The utility library's `BumpAllocator::allocate_atomic()` supports concurrent bump allocation using relaxed atomic operations.
 
 ## Hardware requirements
 
@@ -103,8 +104,8 @@ and [NVIDIA 616.64 WHQL](https://us.download.nvidia.com/Windows/616.64/616.64-wi
 | AMD RDNA 3 (dGPU) | Windows / Adrenalin 26.9.1 | [RX 7000](https://vulkan.gpuinfo.org/displayreport.php?id=51443) | PCIe ReBAR | Supported |
 | AMD RDNA 3 (iGPU) | Windows / Adrenalin 26.9.1 | [700M](https://vulkan.gpuinfo.org/displayreport.php?id=49646) | UMA | Supported |
 | AMD RDNA 4 (dGPU) | Windows / Adrenalin 26.9.1 | [RX 9000](https://vulkan.gpuinfo.org/displayreport.php?id=51293) | PCIe ReBAR | Supported |
-| NVIDIA Turing | Windows / NVIDIA 616.64 | [GTX 16 series][gtx16] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
-| NVIDIA Turing | Windows / NVIDIA 616.64 | [RTX 20 series][turing] | 🔴 [256 MiB fixed BAR][turing-rebar] (214 MiB exposed) | Supported |
+| NVIDIA Turing | Windows / NVIDIA 616.64 | [GTX 16 series][gtx16] | 🔴 [256 MiB fixed BAR][turing-rebar] | Supported |
+| NVIDIA Turing | Windows / NVIDIA 616.64 | [RTX 20 series][turing] | 🔴 [256 MiB fixed BAR][turing-rebar] | Supported |
 | NVIDIA Ampere | Windows / NVIDIA 616.64 | [RTX 30 series](https://vulkan.gpuinfo.org/displayreport.php?id=51549) | PCIe ReBAR | Supported |
 | NVIDIA Ada Lovelace | Windows / NVIDIA 616.64 | [RTX 40 series](https://vulkan.gpuinfo.org/displayreport.php?id=51469) | PCIe ReBAR | Supported |
 | NVIDIA Blackwell | Windows / NVIDIA 616.64 | [RTX 50 series](https://vulkan.gpuinfo.org/displayreport.php?id=51573) | PCIe ReBAR | Supported |
@@ -119,7 +120,7 @@ The checked Windows RDNA 2 reports lack descriptor-heap support.
 Intel Windows support was not verified; the checked
 [Arc report](https://vulkan.gpuinfo.org/displayreport.php?id=51355) also lacks required extensions.
 Mesa RADV and ANV [26.2+](https://docs.mesa3d.org/relnotes/26.2.0.html) expose the required extensions
-on the reported Linux targets, but Linux/SteamOS window presentation is not implemented yet.
+on the reported Linux/SteamOS targets.
 
 See [known driver issues](docs/known-driver-issues.md) for observed problems and workarounds.
 
